@@ -193,25 +193,25 @@ def run_amendment_logic(find_word, replace_word):
             조문식별자 = make_article_number(조번호, 조가지번호)
             조문내용 = article.findtext("조문내용", "") or ""
             if find_word in 조문내용:
-                덩어리별[find_word].append((조문식별자, None, None, None))
+                덩어리별[find_word].append((조문식별자, None, None, None, None))
 
             for 항 in article.findall("항"):
                 항번호 = normalize_number(항.findtext("항번호", "").strip())
                 항내용 = 항.findtext("항내용", "") or ""
                 if find_word in 항내용:
-                    덩어리별[find_word].append((조문식별자, 항번호, None, None))
+                    덩어리별[find_word].append((조문식별자, 항번호, None, None, None))
 
                 for 호 in 항.findall("호"):
                     호번호 = 호.findtext("호번호", "").strip().replace(".", "")
                     호내용 = 호.findtext("호내용", "") or ""
                     if find_word in 호내용:
-                        덩어리별[find_word].append((조문식별자, 항번호, 호번호, None))
+                        덩어리별[find_word].append((조문식별자, 항번호, 호번호, None, None))
 
                     for 목 in 호.findall("목"):
                         목번호 = 목.findtext("목번호", "").strip().replace(".", "")
                         for m in 목.findall("목내용"):
                             if m.text and find_word in m.text:
-                                덩어리별[find_word].append((조문식별자, 항번호, 호번호, 목번호))
+                                덩어리별[find_word].append((조문식별자, 항번호, 호번호, 목번호, None))
 
         if not 덩어리별:
             continue
