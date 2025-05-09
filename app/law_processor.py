@@ -182,6 +182,7 @@ def run_amendment_logic(find_word, replace_word):
         xml_data = get_law_text_by_mst(mst)
         if not xml_data:
             continue
+
         tree = ET.fromstring(xml_data)
         articles = tree.findall(".//조문단위")
         덩어리별 = defaultdict(list)
@@ -190,31 +191,27 @@ def run_amendment_logic(find_word, replace_word):
             조번호 = article.findtext("조문번호", "").strip()
             조가지번호 = article.findtext("조문가지번호", "").strip()
             조문식별자 = make_article_number(조번호, 조가지번호)
-
-            def process(text, 항=None, 호=None, 목=None):
-                if find_word in text:
-                    덩어리 = extract_chunks(text, find_word)
-                    if 덩어리:
-                        덩어리별[덩어리].append((조문식별자, 항, 호, 목, text.strip()))
-
             조문내용 = article.findtext("조문내용", "") or ""
-            process(조문내용)
+            if find_word in 조문내용:
+                덩어리별[find_word].append((조문식별자, None, None, None))
 
             for 항 in article.findall("항"):
                 항번호 = normalize_number(항.findtext("항번호", "").strip())
                 항내용 = 항.findtext("항내용", "") or ""
-                process(항내용, 항=항번호)
+                if find_word in 항내용:
+                    덩어리별[find_word].append((조문식별자, 항번호, None, None))
 
                 for 호 in 항.findall("호"):
                     호번호 = 호.findtext("호번호", "").strip().replace(".", "")
                     호내용 = 호.findtext("호내용", "") or ""
-                    process(호내용, 항=항번호, 호=호번호)
+                    if find_word in 호내용:
+                        덩어리별[find_word].append((조문식별자, 항번호, 호번호, None))
 
                     for 목 in 호.findall("목"):
                         목번호 = 목.findtext("목번호", "").strip().replace(".", "")
                         for m in 목.findall("목내용"):
-                            if m.text:
-                                process(m.text, 항=항번호, 호=호번호, 목=목번호)
+                            if m.text and find_word in m.text:
+                                덩어리별[find_word].append((조문식별자, 항번호, 호번호, 목번호))
 
         if not 덩어리별:
             continue
@@ -222,171 +219,60 @@ def run_amendment_logic(find_word, replace_word):
         문장들 = []
         for 덩어리, locs in 덩어리별.items():
             각각 = "각각 " if len(locs) > 1 else ""
-            locs_formatted = ", ".join([format_location(l) for l in locs[:-1]]) + (" 및 " if len(locs) > 1 else "") + format_location(locs[-1])
-            new_chunk = 덩어리.replace(find_word, replace_word)
-            조문형식 = get_amendment_format(덩어리, find_word, replace_word)
-            문장들.append(f'{locs_formatted} 중 “{덩어리}”{조문형식.format(각각=각각, new_chunk=new_chunk)}')
+            loc_str = ", ".join([format_location(l) for l in locs[:-1]]) + (" 및 " if len(locs) > 1 else "") + format_location(locs[-1])
+
+            조사_출력 = apply_josa_rule(find_word, replace_word)
+            문장들.append(f'{loc_str} 중 “{find_word}”{을를} {각각}“{replace_word}”{조사_출력} 한다.')
 
         prefix = chr(9312 + idx) if idx < 20 else str(idx + 1)
         amendment_results.append(f"{prefix} {law_name} 일부를 다음과 같이 개정한다.<br>" + "<br>".join(문장들))
 
     return amendment_results if amendment_results else ["⚠️ 개정 대상 조문이 없습니다."]
 
+def apply_josa_rule(find_word, replace_word):
+    # 조사 후보 - 긴 것부터
+    josa_candidates = ["으로", "이나", "이나", "로", "을", "를", "과", "와", "이", "가", "나"]
+    found_josa = ""
+    for josa in josa_candidates:
+        if find_word.endswith(josa):
+            found_josa = josa
+            break
 
-def has_batchim(word):
-    """단어의 마지막 글자가 받침을 가지고 있는지 확인"""
-    if not word:
-        return False
-    char_code = ord(word[-1])
-    # 한글 유니코드 범위 확인
-    if 0xAC00 <= char_code <= 0xD7A3:
-        # 종성 확인 (종성이 없으면 0, 있으면 1~27)
-        return (char_code - 0xAC00) % 28 != 0
-    return False
+    word_root = find_word[:-len(found_josa)] if found_josa else find_word
 
+    def has_final_consonant(word):
+        code = ord(word[-1])
+        return (code - 0xAC00) % 28 != 0
 
-def has_batchim_rieul(word):
-    """단어의 마지막 글자가 ㄹ 받침인지 확인"""
-    if not word:
-        return False
-    char_code = ord(word[-1])
-    # 한글 유니코드 범위 확인
-    if 0xAC00 <= char_code <= 0xD7A3:
-        # ㄹ 받침은 종성 코드 8
-        return (char_code - 0xAC00) % 28 == 8
-    return False
+    def has_final_rieul(word):
+        code = ord(word[-1])
+        return (code - 0xAC00) % 28 == 8
 
+    has_batchim = has_final_consonant(replace_word)
+    has_rieul = has_final_rieul(replace_word)
 
-def find_josa(text, word):
-    """검색어 뒤에 붙은 조사 찾기"""
-    # 검색어가 텍스트에 없으면 빈 문자열 반환
-    if word not in text:
-        return ""
-    
-    # 검색어 위치 찾기
-    pos = text.find(word) + len(word)
-    if pos >= len(text):
-        return ""
-    
-    # 조사 후보 - 길이가 긴 것부터 체크
-    josas = ["으로", "이나", "으로", "로", "을", "를", "과", "와", "이", "가", "나"]
-    
-    # 검색어 뒤에 조사가 있는지 확인
-    for josa in josas:
-        if pos + len(josa) <= len(text) and text[pos:pos+len(josa)] == josa:
-            return josa
-    
-    return ""
-
-
-def get_amendment_format(text, find_word, replace_word):
-    """조사 처리 규칙에 따라 적절한 개정문 문구 포맷 반환"""
-    josa = find_josa(text, find_word)
-    has_batchim_B = has_batchim(replace_word)
-    has_rieul_B = has_batchim_rieul(replace_word)
-    has_batchim_A = has_batchim(find_word)
-    
-    # 1. A을 (검색어에 조사 '을' 이 붙어있는 경우)
-    if josa == "을":
-        if has_batchim_B:
-            if has_rieul_B:
-                return "을 {{각각}}\"{new_chunk}\"로 한다."
-            else:
-                return "을 {{각각}}\"{new_chunk}\"으로 한다."
-        else:
-            return "을 {{각각}}\"{new_chunk}\"를로 한다."
-    
-    # 2. A를 (검색어에 조사 '를' 이 붙어있는 경우)
-    elif josa == "를":
-        if has_batchim_B:
-            return "를 {{각각}}\"{new_chunk}\"을로 한다."
-        else:
-            return "를 {{각각}}\"{new_chunk}\"로 한다."
-    
-    # 3. A과 
-    elif josa == "과":
-        if has_batchim_B:
-            if has_rieul_B:
-                return "과를 {{각각}}\"{new_chunk}\"로 한다."
-            else:
-                return "과를 {{각각}}\"{new_chunk}\"으로 한다."
-        else:
-            return "과를 {{각각}}\"{new_chunk}\"와로 한다."
-    
-    # 4. A와
-    elif josa == "와":
-        if has_batchim_B:
-            return "와를 {{각각}}\"{new_chunk}\"과로 한다."
-        else:
-            return "와를 {{각각}}\"{new_chunk}\"로 한다."
-    
-    # 5. A이
-    elif josa == "이":
-        if has_batchim_B:
-            if has_rieul_B:
-                return "이를 {{각각}}\"{new_chunk}\"로 한다."
-            else:
-                return "이를 {{각각}}\"{new_chunk}\"으로 한다."
-        else:
-            return "이를 {{각각}}\"{new_chunk}\"가로 한다."
-    
-    # 6. A가
-    elif josa == "가":
-        if has_batchim_B:
-            return "가를 {{각각}}\"{new_chunk}\"이로 한다."
-        else:
-            return "가를 {{각각}}\"{new_chunk}\"로 한다."
-    
-    # 7. A이나
-    elif josa == "이나":
-        if has_batchim_B:
-            if has_rieul_B:
-                return "이나를 {{각각}}\"{new_chunk}\"로 한다."
-            else:
-                return "이나를 {{각각}}\"{new_chunk}\"으로 한다."
-        else:
-            return "이나를 {{각각}}\"{new_chunk}\"나로 한다."
-    
-    # 8. A나
-    elif josa == "나":
-        if has_batchim_B:
-            return "나를 {{각각}}\"{new_chunk}\"이나로 한다."
-        else:
-            return "나를 {{각각}}\"{new_chunk}\"로 한다."
-    
-    # 9. A으로
-    elif josa == "으로":
-        if has_batchim_B:
-            if has_rieul_B:
-                return "으로를 {{각각}}\"{new_chunk}\"로로 한다."
-            else:
-                return "으로를 {{각각}}\"{new_chunk}\"으로로 한다."
-        else:
-            return "으로를 {{각각}}\"{new_chunk}\"로로 한다."
-    
-    # 10. A로
-    elif josa == "로":
-        if has_batchim_A:
-            if has_batchim_B:
-                if has_rieul_B:
-                    return "로를 {{각각}}\"{new_chunk}\"로 한다."
-                else:
-                    return "로를 {{각각}}\"{new_chunk}\"으로로 한다."
-            else:
-                return "로를 {{각각}}\"{new_chunk}\"로 한다."
-        else:
-            if has_batchim_B:
-                if has_rieul_B:
-                    return "로를 {{각각}}\"{new_chunk}\"로 한다."
-                else:
-                    return "로를 {{각각}}\"{new_chunk}\"으로로 한다."
-            else:
-                return "로를 {{각각}}\"{new_chunk}\"로 한다."
-    
-    # 기본 처리 (조사가 없거나 처리하지 않는 조사인 경우)
+    # 규칙 적용
+    if found_josa == "을":
+        return "로" if has_rieul else "으로" if has_batchim else "를"
+    elif found_josa == "를":
+        return "을" if has_batchim else "로"
+    elif found_josa == "과":
+        return "과" if has_batchim else "와"
+    elif found_josa == "와":
+        return "과" if has_batchim else "로"
+    elif found_josa == "이":
+        return "로" if has_rieul else "으로" if has_batchim else "가"
+    elif found_josa == "가":
+        return "가" if has_batchim else "로"
+    elif found_josa == "이나":
+        return "로" if has_rieul else "으로" if has_batchim else "나"
+    elif found_josa == "나":
+        return "이나" if has_batchim else "로"
+    elif found_josa == "으로":
+        return "로" if has_rieul or not has_batchim else "으로"
+    elif found_josa == "로":
+        return "로" if not has_batchim else "으로" if not has_rieul else "로"
     else:
-        # 기본 조사는 "을/를" 구분
-        if has_batchim_B:
-            return "을 {{각각}}\"{new_chunk}\"으로 한다."
-        else:
-            return "을 {{각각}}\"{new_chunk}\"를 한다."
+        # 기본 처리
+        return "으로" if has_batchim else "로"
+
