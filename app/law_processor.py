@@ -185,50 +185,51 @@ def run_amendment_logic(find_word, replace_word):
         tree = ET.fromstring(xml_data)
         articles = tree.findall(".//조문단위")
         덩어리별 = defaultdict(list)
+
         for article in articles:
             조번호 = article.findtext("조문번호", "").strip()
             조가지번호 = article.findtext("조문가지번호", "").strip()
             조문식별자 = make_article_number(조번호, 조가지번호)
+
+            def process(text, 항=None, 호=None, 목=None):
+                if find_word in text:
+                    덩어리 = extract_chunks(text, find_word)
+                    if 덩어리:
+                        덩어리별[덩어리].append((조문식별자, 항, 호, 목, text.strip()))
+
             조문내용 = article.findtext("조문내용", "") or ""
-            if find_word in 조문내용:
-                덩어리 = extract_chunks(조문내용, find_word)
-                if 덩어리:
-                    덩어리별[덩어리].append((조문식별자, None, None, None, 조문내용.strip()))
+            process(조문내용)
+
             for 항 in article.findall("항"):
                 항번호 = normalize_number(항.findtext("항번호", "").strip())
                 항내용 = 항.findtext("항내용", "") or ""
-                if find_word in 항내용:
-                    덩어리 = extract_chunks(항내용, find_word)
-                    if 덩어리:
-                        덩어리별[덩어리].append((조문식별자, 항번호, None, None, 항내용.strip()))
+                process(항내용, 항=항번호)
+
                 for 호 in 항.findall("호"):
                     호번호 = 호.findtext("호번호", "").strip().replace(".", "")
                     호내용 = 호.findtext("호내용", "") or ""
-                    if find_word in 호내용:
-                        덩어리 = extract_chunks(호내용, find_word)
-                        if 덩어리:
-                            덩어리별[덩어리].append((조문식별자, 항번호, 호번호, None, 호내용.strip()))
+                    process(호내용, 항=항번호, 호=호번호)
+
                     for 목 in 호.findall("목"):
                         목번호 = 목.findtext("목번호", "").strip().replace(".", "")
                         for m in 목.findall("목내용"):
-                            if m.text and find_word in m.text:
-                                덩어리 = extract_chunks(m.text, find_word)
-                                if 덩어리:
-                                    덩어리별[덩어리].append((조문식별자, 항번호, 호번호, 목번호, m.text.strip()))
+                            if m.text:
+                                process(m.text, 항=항번호, 호=호번호, 목=목번호)
+
         if not 덩어리별:
             continue
+
         문장들 = []
         for 덩어리, locs in 덩어리별.items():
             각각 = "각각 " if len(locs) > 1 else ""
-            loc_str = ", ".join([format_location(l) for l in locs[:-1]]) + (" 및 " if len(locs) > 1 else "") + format_location(locs[-1])
+            locs_formatted = ", ".join([format_location(l) for l in locs[:-1]]) + (" 및 " if len(locs) > 1 else "") + format_location(locs[-1])
             new_chunk = 덩어리.replace(find_word, replace_word)
-            
-            # 조사 처리 규칙 적용
-            josa_format = get_amendment_format(덩어리, find_word, replace_word)
-            문장들.append(f'{loc_str} 중 "{덩어리}"{josa_format.format(각각=각각, new_chunk=new_chunk)}')
-        
+            조문형식 = get_amendment_format(덩어리, find_word, replace_word)
+            문장들.append(f'{locs_formatted} 중 “{덩어리}”{조문형식.format(각각=각각, new_chunk=new_chunk)}')
+
         prefix = chr(9312 + idx) if idx < 20 else str(idx + 1)
         amendment_results.append(f"{prefix} {law_name} 일부를 다음과 같이 개정한다.<br>" + "<br>".join(문장들))
+
     return amendment_results if amendment_results else ["⚠️ 개정 대상 조문이 없습니다."]
 
 
