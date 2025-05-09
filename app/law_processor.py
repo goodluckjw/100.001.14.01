@@ -222,7 +222,7 @@ def run_amendment_logic(find_word, replace_word):
             loc_str = ", ".join([format_location(l) for l in locs[:-1]]) + (" 및 " if len(locs) > 1 else "") + format_location(locs[-1])
 
             조사_출력 = apply_josa_rule(find_word, replace_word)
-            문장들.append(f'{loc_str} 중 “{find_word}”{을를} {각각}“{replace_word}”{조사_출력} 한다.')
+            문장들.append(f'{loc_str} 중 “{find_word}”{각각}“{replace_word}”{조사_출력} 한다.')
 
         prefix = chr(9312 + idx) if idx < 20 else str(idx + 1)
         amendment_results.append(f"{prefix} {law_name} 일부를 다음과 같이 개정한다.<br>" + "<br>".join(문장들))
